@@ -1,5 +1,5 @@
-Unreal Engine 版本：5.0.3
-Visual Studio：2022
-clone 后执行：git lfs pull
-右键 ZGD_DK.uproject 生成 VS 项目文件
-编译后再打开工程
+- Unreal Engine 版本：5.0.3
+- Visual Studio：2022
+- clone 后执行：`git lfs pull`
+- 右键 `ZGD_DK.uproject` 生成 VS 项目文件
+- 编译后再打开工程

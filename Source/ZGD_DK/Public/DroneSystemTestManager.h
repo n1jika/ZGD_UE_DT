@@ -29,7 +29,7 @@ public:
     ADroneActor* DroneActorRef = nullptr;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Test|Drone")
-    bool bEnableDronePositionTest = true;
+    bool bEnableDronePositionTest = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Test|Drone", meta = (ClampMin = "0.01"))
     float DronePositionTestInterval = 1.0f;
@@ -39,10 +39,10 @@ public:
     APathActor* PathActorRef = nullptr;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Test|Path")
-    bool bEnablePathTest = true;
+    bool bEnablePathTest = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Test|Path")
-    bool bEnableUpdatedPathTest = true;
+    bool bEnableUpdatedPathTest = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Test|Path", meta = (ClampMin = "0.1"))
     float UpdatedPathDelay = 5.0f;

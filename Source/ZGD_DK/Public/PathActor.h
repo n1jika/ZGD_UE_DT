@@ -166,6 +166,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Visual|Arrows", meta = (ClampMin = "0.0"))
 	float ArrowMoveSpeed = 120.0f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Visual|Arrows")
+	bool bAutoCenterArrowByMeshBounds = true;
+
 private:
 	// 运行时创建出来的主路径网格段
 	UPROPERTY(Transient)

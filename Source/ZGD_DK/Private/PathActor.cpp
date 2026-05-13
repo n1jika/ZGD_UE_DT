@@ -102,8 +102,16 @@ void APathActor::RebuildSpline()
 		return;
 	}
 
-	// 这里按“世界坐标”来设置路径点
+	// 按世界坐标设置路径点
 	PathSpline->SetSplinePoints(PathPoints, ESplineCoordinateSpace::World, false);
+
+	// 把每个点都设成 Linear，这样 spline 本身就是折线
+	const int32 NumPoints = PathSpline->GetNumberOfSplinePoints();
+	for (int32 Index = 0; Index < NumPoints; ++Index)
+	{
+		PathSpline->SetSplinePointType(Index, ESplinePointType::Linear, false);
+	}
+
 	PathSpline->UpdateSpline();
 }
 
@@ -162,14 +170,16 @@ void APathActor::RebuildPathMeshes()
 		MeshComp->SetStaticMesh(PathMesh);
 
 		FVector StartPos = PathSpline->GetLocationAtSplinePoint(Index, ESplineCoordinateSpace::Local);
-		FVector StartTangent = PathSpline->GetTangentAtSplinePoint(Index, ESplineCoordinateSpace::Local) * TangentScale;
 		FVector EndPos = PathSpline->GetLocationAtSplinePoint(Index + 1, ESplineCoordinateSpace::Local);
-		FVector EndTangent = PathSpline->GetTangentAtSplinePoint(Index + 1, ESplineCoordinateSpace::Local) * TangentScale;
 
 		StartPos.Z += PathHeightOffset;
 		EndPos.Z += PathHeightOffset;
 
-		MeshComp->SetStartAndEnd(StartPos, StartTangent, EndPos, EndTangent, true);
+		// 直接按当前线段方向生成切线，不再用缩放后的 spline tangent
+		const FVector SegmentVector = EndPos - StartPos;
+		const FVector SegmentTangent = SegmentVector;
+
+		MeshComp->SetStartAndEnd(StartPos, SegmentTangent, EndPos, SegmentTangent, true);
 
 		const float WidthScale = PathWidth / 100.0f;
 		const float ThicknessScale = PathThickness / 100.0f;
@@ -204,14 +214,16 @@ void APathActor::RebuildCenterLineMeshes()
 		MeshComp->SetStaticMesh(CenterLineMesh);
 
 		FVector StartPos = PathSpline->GetLocationAtSplinePoint(Index, ESplineCoordinateSpace::Local);
-		FVector StartTangent = PathSpline->GetTangentAtSplinePoint(Index, ESplineCoordinateSpace::Local) * TangentScale;
 		FVector EndPos = PathSpline->GetLocationAtSplinePoint(Index + 1, ESplineCoordinateSpace::Local);
-		FVector EndTangent = PathSpline->GetTangentAtSplinePoint(Index + 1, ESplineCoordinateSpace::Local) * TangentScale;
 
 		StartPos.Z += CenterLineHeightOffset;
 		EndPos.Z += CenterLineHeightOffset;
 
-		MeshComp->SetStartAndEnd(StartPos, StartTangent, EndPos, EndTangent, true);
+		// 关键：中轴线也严格跟当前线段方向走
+		const FVector SegmentVector = EndPos - StartPos;
+		const FVector SegmentTangent = SegmentVector;
+
+		MeshComp->SetStartAndEnd(StartPos, SegmentTangent, EndPos, SegmentTangent, true);
 
 		const float WidthScale = CenterLineWidth / 100.0f;
 		const float ThicknessScale = CenterLineThickness / 100.0f;
@@ -307,15 +319,12 @@ void APathActor::RefreshDirectionArrows()
 
 	if (ArrowMaterial)
 	{
-		if (!ArrowMID || ArrowMID->Parent != ArrowMaterial)
-		{
-			ArrowMID = UMaterialInstanceDynamic::Create(ArrowMaterial, this);
-		}
+		const int32 MaterialSlotCount =
+			FMath::Max(1, ArrowInstances->GetStaticMesh() ? ArrowInstances->GetStaticMesh()->GetStaticMaterials().Num() : 1);
 
-		const int32 MaterialSlotCount = FMath::Max(1, ArrowInstances->GetStaticMesh() ? ArrowInstances->GetStaticMesh()->GetStaticMaterials().Num() : 1);
 		for (int32 SlotIndex = 0; SlotIndex < MaterialSlotCount; ++SlotIndex)
 		{
-			ArrowInstances->SetMaterial(SlotIndex, ArrowMID);
+			ArrowInstances->SetMaterial(SlotIndex, ArrowMaterial);
 		}
 	}
 
@@ -327,7 +336,13 @@ void APathActor::RefreshDirectionArrows()
 	}
 
 	const float SafeSpacing = FMath::Max(ArrowSpacing, 50.0f);
+
+	// 关键：箭头基准高度直接跟中轴线走
 	const float FinalHeightOffset = CenterLineHeightOffset + ArrowHeightOffset;
+
+	// 读取箭头网格本地 bounds，用于自动把几何中心压回中轴线
+	const FBoxSphereBounds MeshBounds = ArrowMesh->GetBounds();
+	const FVector LocalBoundsOrigin = MeshBounds.Origin;
 
 	for (float Distance = ArrowMoveOffset; Distance < SplineLength; Distance += SafeSpacing)
 	{
@@ -348,9 +363,27 @@ void APathActor::RefreshDirectionArrows()
 		const FVector RightVector = FRotationMatrix(BaseRotation).GetUnitAxis(EAxis::Y);
 
 		FVector FinalLocation = WorldLocation;
+
+		// 先按中轴线前后/左右做微调
 		FinalLocation += Tangent * ArrowForwardOffset;
 		FinalLocation += RightVector * ArrowLateralOffset;
+
+		// 再放到中轴线高度
 		FinalLocation.Z += FinalHeightOffset;
+
+		// 自动把“网格几何中心”对齐到中轴线
+		if (bAutoCenterArrowByMeshBounds)
+		{
+			const FVector ScaledLocalBoundsOrigin(
+				LocalBoundsOrigin.X * ArrowScale.X,
+				LocalBoundsOrigin.Y * ArrowScale.Y,
+				LocalBoundsOrigin.Z * ArrowScale.Z);
+
+			const FVector BoundsOffsetWorld = FinalRotation.RotateVector(ScaledLocalBoundsOrigin);
+
+			// 注意这里是减去，因为要把几何中心拉回到中轴线上
+			FinalLocation -= BoundsOffsetWorld;
+		}
 
 		const FTransform InstanceTransform(FinalRotation, FinalLocation, ArrowScale);
 		ArrowInstances->AddInstanceWorldSpace(InstanceTransform);

@@ -1,8 +1,8 @@
 #pragma once
 
-#include "Components/ComboBoxString.h"
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
+#include "Components/ComboBoxString.h"
 #include "TargetSelectionWidget.generated.h"
 
 class UButton;
@@ -43,8 +43,8 @@ public:
 	FOnSelectedDroneChanged OnSelectedDroneChanged;
 
 	void SetAvailableDroneIds(const TArray<FString>& InDroneIds, const FString& InSelectedDroneId);
-
 	FString GetSelectedDroneId() const;
+
 	void SetSelectionMode(bool bInSelectionMode, bool bInHasSelectedXY);
 	void SetHeightNormalized(float InNormalizedValue);
 	float GetHeightNormalized() const;
@@ -109,6 +109,7 @@ private:
 
 	bool bSelectionMode = false;
 	bool bHasSelectedXY = false;
-	FString CachedHintMessage = TEXT("Click Start to begin target selection.");
+
+	FString CachedHintMessage = TEXT("Select a drone, then click Start.");
 	FString CachedSelectedDroneId = TEXT("UAV_001");
 };

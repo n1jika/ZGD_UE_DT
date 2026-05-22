@@ -5,6 +5,7 @@
 #include "DronePlayerController.generated.h"
 
 class ADroneCommandCoordinator;
+class ADroneFleetManager;
 class UTargetSelectionWidget;
 
 UCLASS()
@@ -22,22 +23,24 @@ protected:
 
 private:
 	void HandleLeftMouseClick();
+
 	void FindCoordinatorIfNeeded();
+	void FindFleetManagerIfNeeded();
 
 	bool GetMouseIntersectionWithHorizontalPlane(float PlaneZ, FVector& OutWorldPoint) const;
 	bool GetCurrentViewIntersectionWithPlane(float PlaneZ, FVector& OutWorldPoint) const;
+	bool GetBaseSelectionPoint(FVector& OutBasePoint);
 
 	void CreateSelectionWidgetIfNeeded();
 	void EnterTargetSelectionMode();
 	void ExitTargetSelectionMode(bool bRestoreView);
 
+	void RefreshDroneSelectionOptions();
 	void UpdateSelectionWidgetState();
 	void UpdatePreviewTargetPoint();
 
 	float HeightNormalizedToWorldZ(float InValue) const;
 	float WorldZToHeightNormalized(float InWorldZ) const;
-
-	bool GetBaseSelectionPoint(FVector& OutBasePoint);
 
 	UFUNCTION()
 	void HandleStartTargetSelectionRequested();
@@ -51,6 +54,9 @@ private:
 	UFUNCTION()
 	void HandleTargetHeightNormalizedChanged(float NewValue);
 
+	UFUNCTION()
+	void HandleSelectedDroneChanged(FString DroneId);
+
 private:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input", meta = (AllowPrivateAccess = "true"))
 	bool bTraceComplexOnClick = false;
@@ -59,7 +65,14 @@ private:
 	ADroneCommandCoordinator* CoordinatorRef = nullptr;
 
 	UPROPERTY()
+	ADroneFleetManager* FleetManagerRef = nullptr;
+
+	UPROPERTY()
 	UTargetSelectionWidget* TargetSelectionWidget = nullptr;
+
+	// 当前 UI 中选择的无人机编号
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Selection", meta = (AllowPrivateAccess = "true"))
+	FString SelectedDroneId = TEXT("UAV_001");
 
 	// 选点模式是否开启
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Selection", meta = (AllowPrivateAccess = "true"))
@@ -96,6 +109,7 @@ private:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug", meta = (AllowPrivateAccess = "true"))
 	bool bDrawSelectionDebug = true;
 
+	// 0.0f 表示每帧刷新显示，适合实时预览红色小球
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug", meta = (AllowPrivateAccess = "true"))
 	float DebugDisplayTime = 0.0f;
 

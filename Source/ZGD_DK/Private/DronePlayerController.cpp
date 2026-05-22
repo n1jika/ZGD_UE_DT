@@ -1,7 +1,9 @@
 #include "DronePlayerController.h"
 
 #include "DroneCommandCoordinator.h"
+#include "DroneFleetManager.h"
 #include "TargetSelectionWidget.h"
+
 #include "DrawDebugHelpers.h"
 #include "Engine/Engine.h"
 #include "GameFramework/Pawn.h"
@@ -26,7 +28,10 @@ void ADronePlayerController::BeginPlay()
 	SetInputMode(InputMode);
 
 	FindCoordinatorIfNeeded();
+	FindFleetManagerIfNeeded();
+
 	CreateSelectionWidgetIfNeeded();
+	RefreshDroneSelectionOptions();
 
 	PendingTargetZ = FMath::Clamp(PendingTargetZ, MinTargetZ, MaxTargetZ);
 	UpdateSelectionWidgetState();
@@ -60,6 +65,17 @@ void ADronePlayerController::FindCoordinatorIfNeeded()
 	CoordinatorRef = Cast<ADroneCommandCoordinator>(FoundActor);
 }
 
+void ADronePlayerController::FindFleetManagerIfNeeded()
+{
+	if (FleetManagerRef)
+	{
+		return;
+	}
+
+	AActor* FoundActor = UGameplayStatics::GetActorOfClass(GetWorld(), ADroneFleetManager::StaticClass());
+	FleetManagerRef = Cast<ADroneFleetManager>(FoundActor);
+}
+
 bool ADronePlayerController::GetMouseIntersectionWithHorizontalPlane(float PlaneZ, FVector& OutWorldPoint) const
 {
 	FVector WorldOrigin;
@@ -87,7 +103,7 @@ bool ADronePlayerController::GetMouseIntersectionWithHorizontalPlane(float Plane
 
 bool ADronePlayerController::GetBaseSelectionPoint(FVector& OutBasePoint)
 {
-	// 方案 1：优先使用鼠标命中的真实表面位置
+	// 优先使用鼠标命中的真实场景表面位置，改善视觉点击点与实际点的偏差
 	if (bPreferSurfaceHitForXY)
 	{
 		FHitResult HitResult;
@@ -104,7 +120,7 @@ bool ADronePlayerController::GetBaseSelectionPoint(FVector& OutBasePoint)
 		}
 	}
 
-	// 方案 2：如果没有命中任何表面，再退回水平平面求交
+	// 未命中表面时退回水平参考平面求交
 	return GetMouseIntersectionWithHorizontalPlane(BaseSelectionPlaneZ, OutBasePoint);
 }
 
@@ -135,6 +151,7 @@ void ADronePlayerController::CreateSelectionWidgetIfNeeded()
 {
 	if (TargetSelectionWidget)
 	{
+		RefreshDroneSelectionOptions();
 		return;
 	}
 
@@ -150,6 +167,38 @@ void ADronePlayerController::CreateSelectionWidgetIfNeeded()
 	TargetSelectionWidget->OnConfirmTargetSelectionRequested.AddDynamic(this, &ADronePlayerController::HandleConfirmTargetSelectionRequested);
 	TargetSelectionWidget->OnCancelTargetSelectionRequested.AddDynamic(this, &ADronePlayerController::HandleCancelTargetSelectionRequested);
 	TargetSelectionWidget->OnTargetHeightNormalizedChanged.AddDynamic(this, &ADronePlayerController::HandleTargetHeightNormalizedChanged);
+	TargetSelectionWidget->OnSelectedDroneChanged.AddDynamic(this, &ADronePlayerController::HandleSelectedDroneChanged);
+
+	RefreshDroneSelectionOptions();
+}
+
+void ADronePlayerController::RefreshDroneSelectionOptions()
+{
+	FindFleetManagerIfNeeded();
+
+	TArray<FString> DroneIds;
+
+	if (FleetManagerRef)
+	{
+		// 确保列表是当前场景中的最新无人机
+		FleetManagerRef->RegisterSceneActors();
+		DroneIds = FleetManagerRef->GetRegisteredDroneIds();
+	}
+
+	if (DroneIds.Num() == 0)
+	{
+		DroneIds.Add(TEXT("UAV_001"));
+	}
+
+	if (!DroneIds.Contains(SelectedDroneId))
+	{
+		SelectedDroneId = DroneIds[0];
+	}
+
+	if (TargetSelectionWidget)
+	{
+		TargetSelectionWidget->SetAvailableDroneIds(DroneIds, SelectedDroneId);
+	}
 }
 
 void ADronePlayerController::EnterTargetSelectionMode()
@@ -158,6 +207,8 @@ void ADronePlayerController::EnterTargetSelectionMode()
 	{
 		return;
 	}
+
+	RefreshDroneSelectionOptions();
 
 	APawn* ControlledPawn = GetPawn();
 	if (ControlledPawn)
@@ -187,7 +238,6 @@ void ADronePlayerController::EnterTargetSelectionMode()
 		ControlledPawn->SetActorLocation(FVector(FocusPoint.X, FocusPoint.Y, BaseSelectionPlaneZ + TopDownCameraHeight));
 	}
 
-	// 完全俯视
 	const float YawToKeep = StoredControlRotation.Yaw;
 	SetControlRotation(FRotator(-89.9f, YawToKeep, 0.0f));
 
@@ -220,6 +270,7 @@ void ADronePlayerController::ExitTargetSelectionMode(bool bRestoreView)
 		{
 			ControlledPawn->SetActorLocation(StoredPawnLocation);
 		}
+
 		SetControlRotation(StoredControlRotation);
 	}
 
@@ -239,7 +290,7 @@ void ADronePlayerController::UpdateSelectionWidgetState()
 
 	if (!bIsInTargetSelectionMode)
 	{
-		TargetSelectionWidget->SetHintMessage(TEXT("Click Start"));
+		TargetSelectionWidget->SetHintMessage(TEXT("Select a drone, then click Start."));
 	}
 	else if (!bHasSelectedBasePoint)
 	{
@@ -247,7 +298,7 @@ void ADronePlayerController::UpdateSelectionWidgetState()
 	}
 	else
 	{
-		TargetSelectionWidget->SetHintMessage(TEXT("Selected XY position"));
+		TargetSelectionWidget->SetHintMessage(TEXT("Selected XY position, then adjust height and confirm."));
 	}
 }
 
@@ -324,31 +375,64 @@ void ADronePlayerController::HandleConfirmTargetSelectionRequested()
 		return;
 	}
 
-	FindCoordinatorIfNeeded();
+	const FVector FinalTargetPoint(PendingBasePoint.X, PendingBasePoint.Y, PendingTargetZ);
 
-	if (!CoordinatorRef)
+	if (TargetSelectionWidget)
 	{
-		if (GEngine)
+		const FString WidgetSelectedDroneId = TargetSelectionWidget->GetSelectedDroneId();
+		if (!WidgetSelectedDroneId.IsEmpty())
 		{
-			GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Red, TEXT("DroneCommandCoordinator not found."));
+			SelectedDroneId = WidgetSelectedDroneId;
 		}
-		return;
 	}
 
-	const FVector FinalTargetPoint(PendingBasePoint.X, PendingBasePoint.Y, PendingTargetZ);
-	CoordinatorRef->SubmitTargetPoint(FinalTargetPoint);
+	FindFleetManagerIfNeeded();
 
-	if (GEngine)
+	if (FleetManagerRef)
 	{
-		GEngine->AddOnScreenDebugMessage(
-			-1,
-			3.0f,
-			FColor::Cyan,
-			FString::Printf(
-				TEXT("Target confirmed: (%.1f, %.1f, %.1f)"),
-				FinalTargetPoint.X,
-				FinalTargetPoint.Y,
-				FinalTargetPoint.Z));
+		FleetManagerRef->SubmitTargetPointById(SelectedDroneId, FinalTargetPoint);
+
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(
+				-1,
+				3.0f,
+				FColor::Cyan,
+				FString::Printf(
+					TEXT("Target confirmed for %s: (%.1f, %.1f, %.1f)"),
+					*SelectedDroneId,
+					FinalTargetPoint.X,
+					FinalTargetPoint.Y,
+					FinalTargetPoint.Z));
+		}
+	}
+	else
+	{
+		FindCoordinatorIfNeeded();
+
+		if (!CoordinatorRef)
+		{
+			if (GEngine)
+			{
+				GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Red, TEXT("No FleetManager or CommandCoordinator found."));
+			}
+			return;
+		}
+
+		CoordinatorRef->SubmitTargetPoint(FinalTargetPoint);
+
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(
+				-1,
+				3.0f,
+				FColor::Cyan,
+				FString::Printf(
+					TEXT("Target confirmed: (%.1f, %.1f, %.1f)"),
+					FinalTargetPoint.X,
+					FinalTargetPoint.Y,
+					FinalTargetPoint.Z));
+		}
 	}
 
 	ExitTargetSelectionMode(true);
@@ -373,6 +457,25 @@ void ADronePlayerController::HandleTargetHeightNormalizedChanged(float NewValue)
 {
 	PendingTargetZ = HeightNormalizedToWorldZ(NewValue);
 	UpdateSelectionWidgetState();
+}
+
+void ADronePlayerController::HandleSelectedDroneChanged(FString DroneId)
+{
+	if (DroneId.IsEmpty())
+	{
+		return;
+	}
+
+	SelectedDroneId = DroneId;
+
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(
+			-1,
+			2.0f,
+			FColor::Cyan,
+			FString::Printf(TEXT("Selected Drone: %s"), *SelectedDroneId));
+	}
 }
 
 void ADronePlayerController::HandleLeftMouseClick()
@@ -404,7 +507,7 @@ void ADronePlayerController::HandleLeftMouseClick()
 			2.5f,
 			FColor::Yellow,
 			FString::Printf(
-				TEXT("XY position selected:(%.1f, %.1f, %.1f)"),
+				TEXT("XY position selected: (%.1f, %.1f, %.1f)"),
 				PendingBasePoint.X,
 				PendingBasePoint.Y,
 				PendingBasePoint.Z));

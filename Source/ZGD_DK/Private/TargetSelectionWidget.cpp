@@ -5,14 +5,15 @@
 #include "Components/Button.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
+#include "Components/ComboBoxString.h"
+#include "Components/HorizontalBox.h"
+#include "Components/HorizontalBoxSlot.h"
 #include "Components/Slider.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
 #include "Widgets/SNullWidget.h"
-#include "Components/ComboBoxString.h"
-#include "Components/HorizontalBox.h"
-#include "Components/HorizontalBoxSlot.h"
+
 TSharedRef<SWidget> UTargetSelectionWidget::RebuildWidget()
 {
 	BuildWidgetTreeIfNeeded();
@@ -49,6 +50,12 @@ void UTargetSelectionWidget::NativeConstruct()
 		HeightSlider->OnValueChanged.AddDynamic(this, &UTargetSelectionWidget::HandleHeightSliderChanged);
 	}
 
+	if (DroneComboBox)
+	{
+		DroneComboBox->OnSelectionChanged.Clear();
+		DroneComboBox->OnSelectionChanged.AddDynamic(this, &UTargetSelectionWidget::HandleDroneComboSelectionChanged);
+	}
+
 	RefreshVisualState();
 }
 
@@ -61,6 +68,9 @@ void UTargetSelectionWidget::BuildWidgetTreeIfNeeded()
 
 	UCanvasPanel* RootCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("RootCanvas"));
 	WidgetTree->RootWidget = RootCanvas;
+
+	// RootCanvas 只作为布局容器，不拦截 UI 面板外的场景点击
+	RootCanvas->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 
 	RootBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RootBorder"));
 	RootBorder->SetBrushColor(FLinearColor(0.02f, 0.02f, 0.02f, 0.75f));
@@ -92,6 +102,40 @@ void UTargetSelectionWidget::BuildWidgetTreeIfNeeded()
 		VBoxSlot->SetPadding(FMargin(12.0f, 0.0f, 12.0f, 8.0f));
 	}
 
+	UHorizontalBox* DroneRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("DroneRow"));
+	if (DroneRow)
+	{
+		if (UVerticalBoxSlot* VBoxSlot = RootVBox->AddChildToVerticalBox(DroneRow))
+		{
+			VBoxSlot->SetPadding(FMargin(12.0f, 0.0f, 12.0f, 8.0f));
+		}
+
+		DroneLabelText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("DroneLabelText"));
+		if (DroneLabelText)
+		{
+			DroneLabelText->SetText(FText::FromString(TEXT("Drone")));
+			DroneLabelText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+
+			if (UHorizontalBoxSlot* LabelSlot = DroneRow->AddChildToHorizontalBox(DroneLabelText))
+			{
+				LabelSlot->SetPadding(FMargin(0.0f, 0.0f, 8.0f, 0.0f));
+				LabelSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
+			}
+		}
+
+		DroneComboBox = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass(), TEXT("DroneComboBox"));
+		if (DroneComboBox)
+		{
+			DroneComboBox->AddOption(TEXT("UAV_001"));
+			DroneComboBox->SetSelectedOption(TEXT("UAV_001"));
+
+			if (UHorizontalBoxSlot* ComboSlot = DroneRow->AddChildToHorizontalBox(DroneComboBox))
+			{
+				ComboSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+			}
+		}
+	}
+
 	StartSelectButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("StartSelectButton"));
 	UTextBlock* StartButtonText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("StartButtonText"));
 	StartButtonText->SetText(FText::FromString(TEXT("Start")));
@@ -118,7 +162,7 @@ void UTargetSelectionWidget::BuildWidgetTreeIfNeeded()
 	}
 
 	HeightValueText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("HeightValueText"));
-	HeightValueText->SetText(FText::FromString(TEXT("Target Height：0 cm")));
+	HeightValueText->SetText(FText::FromString(TEXT("Target Height: 0 cm")));
 	HeightValueText->SetColorAndOpacity(FSlateColor(FLinearColor(0.75f, 1.0f, 0.75f, 1.0f)));
 	if (UVerticalBoxSlot* VBoxSlot = RootVBox->AddChildToVerticalBox(HeightValueText))
 	{
@@ -146,6 +190,58 @@ void UTargetSelectionWidget::BuildWidgetTreeIfNeeded()
 	}
 }
 
+void UTargetSelectionWidget::SetAvailableDroneIds(const TArray<FString>& InDroneIds, const FString& InSelectedDroneId)
+{
+	BuildWidgetTreeIfNeeded();
+
+	if (!DroneComboBox)
+	{
+		return;
+	}
+
+	DroneComboBox->ClearOptions();
+
+	for (const FString& DroneId : InDroneIds)
+	{
+		if (!DroneId.IsEmpty())
+		{
+			DroneComboBox->AddOption(DroneId);
+		}
+	}
+
+	FString TargetDroneId = InSelectedDroneId;
+
+	if (TargetDroneId.IsEmpty() || DroneComboBox->FindOptionIndex(TargetDroneId) == INDEX_NONE)
+	{
+		if (DroneComboBox->GetOptionCount() > 0)
+		{
+			TargetDroneId = DroneComboBox->GetOptionAtIndex(0);
+		}
+		else
+		{
+			TargetDroneId = TEXT("UAV_001");
+			DroneComboBox->AddOption(TargetDroneId);
+		}
+	}
+
+	CachedSelectedDroneId = TargetDroneId;
+	DroneComboBox->SetSelectedOption(CachedSelectedDroneId);
+}
+
+FString UTargetSelectionWidget::GetSelectedDroneId() const
+{
+	if (DroneComboBox)
+	{
+		const FString SelectedOption = DroneComboBox->GetSelectedOption();
+		if (!SelectedOption.IsEmpty())
+		{
+			return SelectedOption;
+		}
+	}
+
+	return CachedSelectedDroneId;
+}
+
 void UTargetSelectionWidget::SetSelectionMode(bool bInSelectionMode, bool bInHasSelectedXY)
 {
 	bSelectionMode = bInSelectionMode;
@@ -170,7 +266,7 @@ void UTargetSelectionWidget::SetHeightValue(float InHeightCm)
 {
 	if (HeightValueText)
 	{
-		HeightValueText->SetText(FText::FromString(FString::Printf(TEXT("Target Height：%.0f cm"), InHeightCm)));
+		HeightValueText->SetText(FText::FromString(FString::Printf(TEXT("Target Height: %.0f cm"), InHeightCm)));
 	}
 }
 
@@ -202,6 +298,17 @@ void UTargetSelectionWidget::HandleCancelButtonClicked()
 void UTargetSelectionWidget::HandleHeightSliderChanged(float InValue)
 {
 	OnTargetHeightNormalizedChanged.Broadcast(InValue);
+}
+
+void UTargetSelectionWidget::HandleDroneComboSelectionChanged(FString SelectedItem, ESelectInfo::Type SelectionType)
+{
+	if (SelectedItem.IsEmpty())
+	{
+		return;
+	}
+
+	CachedSelectedDroneId = SelectedItem;
+	OnSelectedDroneChanged.Broadcast(CachedSelectedDroneId);
 }
 
 void UTargetSelectionWidget::RefreshVisualState()

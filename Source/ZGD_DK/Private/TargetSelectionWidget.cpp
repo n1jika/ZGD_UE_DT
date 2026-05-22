@@ -10,7 +10,9 @@
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
 #include "Widgets/SNullWidget.h"
-
+#include "Components/ComboBoxString.h"
+#include "Components/HorizontalBox.h"
+#include "Components/HorizontalBoxSlot.h"
 TSharedRef<SWidget> UTargetSelectionWidget::RebuildWidget()
 {
 	BuildWidgetTreeIfNeeded();

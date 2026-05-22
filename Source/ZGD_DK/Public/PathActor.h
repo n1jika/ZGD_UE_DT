@@ -22,6 +22,13 @@ public:
 	virtual void Tick(float DeltaTime) override;
 	virtual void OnConstruction(const FTransform& Transform) override;
 
+	// 当前路径对应的无人机编号
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Path|Owner")
+	FString OwnerDroneId = TEXT("UAV_001");
+
+	UFUNCTION(BlueprintCallable, Category = "Path")
+	FString GetOwnerDroneId() const { return OwnerDroneId; }
+
 	// 外部调用：更新整条路径点
 	UFUNCTION(BlueprintCallable, Category = "Path")
 	void UpdatePathPoints(const TArray<FVector>& InPathPoints);
